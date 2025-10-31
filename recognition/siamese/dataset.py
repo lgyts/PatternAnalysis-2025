@@ -1,27 +1,9 @@
-# dataset.py
-# ---------------------------------------------
 # ISIC 2020 (preprocessed, 256x256) dataset utils
 # Provides:
 #   - ISICTable: read & split & balance
 #   - ISICImageDataset: (image, label, idx)
 #   - ISICTripletDataset: (anchor, positive, negative, anchor_label)
 #   - get_loaders(): build DataLoaders for triplet-training & classifier
-#
-# Expected config.py symbols (define them there):
-#   DATAPATH:       root dir, e.g., "./dataset"
-#   CSV_NAME:       "train-metadata.csv"
-#   IMG_DIR:        "train-image"
-#   SEED:           42
-#   TRAIN_FRAC:     0.7
-#   VAL_FRAC:       0.1
-#   TEST_FRAC:      0.2
-#   USE_GROUP_SPLIT: True or False   (use patient_id to avoid leakage)
-#   BATCH_TRIPLET:  64               (each sample returns 3 images)
-#   BATCH_CLASSIF:  64
-#   NUM_WORKERS:    4
-#   MEAN:           [0.5, 0.5, 0.5]  (or ImageNet means)
-#   STD:            [0.5, 0.5, 0.5]
-# ---------------------------------------------
 
 import os
 import random
@@ -113,5 +95,67 @@ class ISICTable:
         if use_group and "patient_id" in self.df.columns:
             return self._split_with_group(train, val, seed)
         return self._split_no_group(train, val, seed)
-
     
+    @staticmethod
+    def balance_1to1(df: pd.DataFrame, seed: int = SEED) -> pd.DataFrame:
+        pos = df[df["target"] == 1]
+        neg = df[df["target"] == 0]
+        if len(pos) == 0 or len(neg) == 0:
+            return df.reset_index(drop=True)
+        if len(pos) < len(neg):
+            neg = neg.sample(n=len(pos), random_state=seed)
+        else:
+            pos = pos.sample(n=len(neg), random_state=seed)
+        out = pd.concat([pos, neg]).sample(frac=1.0, random_state=seed)
+        return out.reset_index(drop=True)
+    
+
+# Image dataset utils
+class ISICImageDataset(Dataset):
+    """Return (image, label, index) for classifier or embedding extraction."""
+    def __init__(self, df: pd.DataFrame, transform=None):
+        self.df = df.reset_index(drop=True)
+        self.tfm = transform
+
+    def __len__(self) -> int:
+        return len(self.df)
+
+    def __getitem__(self, i: int):
+        row = self.df.iloc[i]
+        img = Image.open(row["filepath"]).convert("RGB")
+        if self.tfm:
+            img = self.tfm(img)
+        label = int(row["target"])
+        return img, label, i
+
+
+# Triplet dataset utils
+class ISICTripletDataset(Dataset):
+    """Return (anchor, positive, negative, anchor_label) for triplet loss."""
+    def __init__(self, df: pd.DataFrame, transform=None, seed: int = SEED):
+        self.df = df.reset_index(drop=True)
+        self.tfm = transform
+        self.by_cls = {
+            0: self.df[self.df["target"] == 0].index.tolist(),
+            1: self.df[self.df["target"] == 1].index.tolist(),
+        }
+        random.seed(seed)
+
+    def __len__(self) -> int:
+        return len(self.df)
+
+    def _load(self, idx: int):
+        path = self.df.iloc[idx]["filepath"]
+        img = Image.open(path).convert("RGB")
+        return self.tfm(img) if self.tfm else img
+
+    def __getitem__(self, i: int):
+        anc_row = self.df.iloc[i]
+        y = int(anc_row["target"])
+        same = [j for j in self.by_cls[y] if j != i]
+        pos_idx = random.choice(same) if same else i
+        neg_idx = random.choice(self.by_cls[1 - y])
+        anc = self._load(i)
+        pos = self._load(pos_idx)
+        neg = self._load(neg_idx)
+        return anc, pos, neg, y
