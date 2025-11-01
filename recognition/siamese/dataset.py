@@ -159,3 +159,19 @@ class ISICTripletDataset(Dataset):
         pos = self._load(pos_idx)
         neg = self._load(neg_idx)
         return anc, pos, neg, y
+    
+
+# Transform utils
+def build_transforms(image_size: int = 256):
+    train_tfm = T.Compose([
+        T.RandomHorizontalFlip(p=0.5),
+        T.RandomVerticalFlip(p=0.5),
+        T.RandomRotation(degrees=15),
+        T.ToTensor(),
+        T.Normalize(mean=MEAN, std=STD),
+    ])
+    eval_tfm = T.Compose([
+        T.ToTensor(),
+        T.Normalize(mean=MEAN, std=STD),
+    ])
+    return train_tfm, eval_tfm
