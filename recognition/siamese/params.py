@@ -16,10 +16,10 @@ STD  = [0.5, 0.5, 0.5]
 
 # training hyperparameters
 TRIPLET_MARGIN = 1.0
-EPOCHS_SIAMESE = 180
-EPOCHS_CLS     = 140
-LR_SIAMESE     = 1e-4
-LR_CLS         = 5e-4
+EPOCHS_SIAMESE = 90
+EPOCHS_CLS     = 80
+LR_SIAMESE     = 0.0001
+LR_CLS         = 0.0005
 
 # save paths
 MODELPATH = "./models"
