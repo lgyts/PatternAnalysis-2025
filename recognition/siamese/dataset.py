@@ -41,15 +41,33 @@ class ISICTable:
     """Load metadata, materialize filepaths, split and balance to 1:1."""
     def __init__(self, root: str, csv_name: str = CSV_NAME, image_dir: str = IMG_DIR):
         self.root = Path(root)
+
         df = pd.read_csv(self.root / csv_name)
-        # Materialize filepaths; filter rows whose file doesn't exist
+        if df.columns[0].lower().startswith("unnamed"):
+            df = df.drop(columns=[df.columns[0]])
+
+        # normalize column names
+        df.columns = [c.strip().lower() for c in df.columns]
+        df = df[["isic_id", "patient_id", "target"]]
+
+        # directly map .jpg filepaths
+        img_dir_path = self.root / image_dir / "image"
         df["filepath"] = df["isic_id"].astype(str).apply(
-            lambda x: str(self.root / image_dir / f"{x}.jpg")
+            lambda x: str(img_dir_path / f"{x}.jpg")
         )
+
+        # keep only existing files
         df = df[df["filepath"].apply(os.path.exists)].reset_index(drop=True)
-        # Ensure dtypes
         df["target"] = df["target"].astype(int)
+
+        if len(df) == 0:
+            raise RuntimeError(
+                f"No .jpg images found in {img_dir_path}. "
+                "Check directory level and filename consistency."
+            )
+
         self.df = df
+        print(f"[INFO] Loaded {len(df)} samples from {csv_name}")
 
     def _split_no_group(self, train: float, val: float, seed: int):
         y = self.df["target"].values

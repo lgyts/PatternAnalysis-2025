@@ -1,6 +1,6 @@
-DATAPATH = "./dataset"
+DATAPATH = r"D:\DEV\PatternAnalysis-2025\recognition\siamese\dataset"
 CSV_NAME = "train-metadata.csv"
-IMG_DIR  = "train-image"
+IMG_DIR = "train-image"
 
 SEED = 42
 TRAIN_FRAC, VAL_FRAC, TEST_FRAC = 0.7, 0.1, 0.2

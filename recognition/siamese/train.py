@@ -3,10 +3,10 @@ from params import (MODELPATH, IMAGEPATH, EPOCHS_SIAMESE, EPOCHS_CLS,
 from dataset import get_loaders
 from modules import SiameseEncoder, BinaryClassifier
 
-import tqdm
+from tqdm import tqdm
 import torch
 import torch.nn as nn
-
+import os
 
 
 # train siamese encoder with triplet loss
@@ -16,14 +16,29 @@ def train_siamese(encoder, loader, device):
     criterion = nn.TripletMarginLoss(margin=TRIPLET_MARGIN, p=2)
 
     for epoch in range(EPOCHS_SIAMESE):
-        total_loss = 0
-        for anc, pos, neg, _ in tqdm(loader, desc=f"Siamese Epoch {epoch+1}/{EPOCHS_SIAMESE}", leave=False):
+        total_loss = 0.0
+        total = len(loader)
+        print(f"\n[Siamese] Epoch {epoch+1}/{EPOCHS_SIAMESE}")
+
+        for i, (anc, pos, neg, _) in enumerate(loader):
             anc, pos, neg = anc.to(device), pos.to(device), neg.to(device)
             za, zp, zn = encoder(anc), encoder(pos), encoder(neg)
             loss = criterion(za, zp, zn)
-            opt.zero_grad(); loss.backward(); opt.step()
+
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+
             total_loss += loss.item()
-        print(f"[Siamese] epoch {epoch+1}: loss={total_loss/len(loader):.4f}")
+
+            # progress display per 10 batches
+            if (i + 1) % 10 == 0 or (i + 1) == total:
+                pct = 100.0 * (i + 1) / total
+                print(f"\rProgress: {pct:5.1f}% complete", end="")
+
+        avg_loss = total_loss / max(1, total)
+        print(f"\rProgress: 100.0% complete")
+        print(f"[Siamese] epoch {epoch+1}: loss={avg_loss:.4f}")
 
 # extract features using trained encoder
 def extract_features(encoder, loader, device):

@@ -1,2 +1,4 @@
 #ignore dataset files
 dataset/
+test.py
+__pycache__/
