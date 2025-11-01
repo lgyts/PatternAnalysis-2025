@@ -1,4 +1,4 @@
-DATAPATH = r"D:\DEV\PatternAnalysis-2025\recognition\siamese\dataset"
+DATAPATH = "./dataset"
 CSV_NAME = "train-metadata.csv"
 IMG_DIR = "train-image"
 
