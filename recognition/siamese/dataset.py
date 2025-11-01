@@ -18,8 +18,8 @@ from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms as T
 
 try:
-    # Config is user-defined; fallback defaults if missing for quick testing
-    from config import (
+    #  parameters are stored in params.py
+    from params import (
         DATAPATH, CSV_NAME, IMG_DIR, SEED,
         TRAIN_FRAC, VAL_FRAC, TEST_FRAC, USE_GROUP_SPLIT,
         BATCH_TRIPLET, BATCH_CLASSIF, NUM_WORKERS, MEAN, STD
