@@ -175,3 +175,64 @@ def build_transforms(image_size: int = 256):
         T.Normalize(mean=MEAN, std=STD),
     ])
     return train_tfm, eval_tfm
+
+
+
+def get_loaders(
+    dataroot: str = DATAPATH,
+    balance_each_split: bool = True,
+    use_group_split: bool = USE_GROUP_SPLIT,
+    batch_triplet: int = BATCH_TRIPLET,
+    batch_classif: int = BATCH_CLASSIF,
+    num_workers: int = NUM_WORKERS,
+):
+    """
+    Returns:
+        dict with keys:
+          'triplet_train', 'classif_train', 'classif_val', 'classif_test'
+        Each value is a DataLoader.
+    """
+    table = ISICTable(dataroot, CSV_NAME, IMG_DIR)
+    tr_df, va_df, te_df = table.split(
+        train=TRAIN_FRAC, val=VAL_FRAC, test=TEST_FRAC,
+        use_group=use_group_split, seed=SEED
+    )
+
+    if balance_each_split:
+        tr_df = ISICTable.balance_1to1(tr_df, seed=SEED)
+        va_df = ISICTable.balance_1to1(va_df, seed=SEED)
+        te_df = ISICTable.balance_1to1(te_df, seed=SEED)
+
+    tfm_train, tfm_eval = build_transforms(image_size=256)
+
+    # Triplet training uses only the (balanced) training split
+    ds_triplet = ISICTripletDataset(tr_df, transform=tfm_train, seed=SEED)
+    dl_triplet = DataLoader(
+        ds_triplet, batch_size=batch_triplet, shuffle=True,
+        num_workers=num_workers, pin_memory=True, drop_last=True
+    )
+
+    # Classifier loaders (feature extractor -> classifier)
+    ds_tr_cls = ISICImageDataset(tr_df, transform=tfm_train)
+    ds_va_cls = ISICImageDataset(va_df, transform=tfm_eval)
+    ds_te_cls = ISICImageDataset(te_df, transform=tfm_eval)
+
+    dl_tr_cls = DataLoader(
+        ds_tr_cls, batch_size=batch_classif, shuffle=True,
+        num_workers=num_workers, pin_memory=True, drop_last=False
+    )
+    dl_va_cls = DataLoader(
+        ds_va_cls, batch_size=batch_classif, shuffle=False,
+        num_workers=num_workers, pin_memory=True, drop_last=False
+    )
+    dl_te_cls = DataLoader(
+        ds_te_cls, batch_size=batch_classif, shuffle=False,
+        num_workers=num_workers, pin_memory=True, drop_last=False
+    )
+
+    return {
+        "triplet_train": dl_triplet,
+        "classif_train": dl_tr_cls,
+        "classif_val": dl_va_cls,
+        "classif_test": dl_te_cls,
+    }
