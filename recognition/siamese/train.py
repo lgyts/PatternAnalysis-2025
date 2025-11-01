@@ -44,10 +44,15 @@ def train_siamese(encoder, loader, device):
 def extract_features(encoder, loader, device):
     encoder.eval()
     feats, labels = [], []
+    total = len(loader)
     with torch.no_grad():
-        for xb, yb, _ in tqdm(loader, desc="Extracting features", leave=False):
+        for i, (xb, yb, _) in enumerate(loader):
             z = encoder(xb.to(device)).cpu()
             feats.append(z); labels.append(yb)
+            if (i + 1) % 10 == 0 or (i + 1) == total:
+                pct = 100.0 * (i + 1) / total
+                print(f"\r[Extract] {pct:5.1f}% complete", end="")
+    print()
     return torch.cat(feats), torch.cat(labels)
 
 # train classifier on extracted features
@@ -84,20 +89,34 @@ def main():
     cls_va = loaders["classif_val"]
     cls_te = loaders["classif_test"]
 
-    # training siamese encoder
-    encoder = SiameseEncoder(out_dim=1000).to(device)
-    train_siamese(encoder, tri_loader, device)
-    torch.save(encoder.state_dict(), os.path.join(MODELPATH, "siamese.pth"))
+    os.makedirs(MODELPATH, exist_ok=True)  
 
-    # extract features
+    # load or train siamese encoder
+    encoder = SiameseEncoder(out_dim=1000).to(device)
+    enc_path = os.path.join(MODELPATH, "siamese.pth")
+    if os.path.exists(enc_path):
+        encoder.load_state_dict(torch.load(enc_path, map_location=device))
+        print(f"[INFO] Loaded existing encoder: {enc_path}")
+    else:
+        train_siamese(encoder, tri_loader, device)
+        torch.save(encoder.state_dict(), enc_path)
+        print(f"[INFO] Saved encoder to {enc_path}")
+
+    # extract features for classification
     Xtr, ytr = extract_features(encoder, cls_tr, device)
     Xva, yva = extract_features(encoder, cls_va, device)
     Xte, yte = extract_features(encoder, cls_te, device)
 
     # train classifier
     clf = BinaryClassifier(in_dim=1000).to(device)
-    train_classifier(clf, (Xtr, ytr), (Xva, yva), device)
-    torch.save(clf.state_dict(), os.path.join(MODELPATH, "classifier.pth"))
+    clf_path = os.path.join(MODELPATH, "classifier.pth")
+    if os.path.exists(clf_path):
+        clf.load_state_dict(torch.load(clf_path, map_location=device))
+        print(f"[INFO] Loaded existing classifier: {clf_path}")
+    else:
+        train_classifier(clf, (Xtr, ytr), (Xva, yva), device)
+        torch.save(clf.state_dict(), clf_path)
+        print(f"[INFO] Saved classifier to {clf_path}")
 
     # evaluate on test set
     clf.eval()
