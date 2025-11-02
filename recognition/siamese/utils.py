@@ -1,4 +1,9 @@
 # utils.py
+# Utility functions for filesystem, seeding, device, denormalization,
+# visualization, and checkpointing.
+
+
+
 import os
 import random
 import math

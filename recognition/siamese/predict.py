@@ -1,4 +1,9 @@
 # predict.py
+# Evaluation script for Siamese encoder and binary classifier on ISIC dataset.
+# Computes accuracy, confusion matrix, and classification report on test set.
+
+
+
 import os
 import argparse
 import torch

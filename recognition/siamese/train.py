@@ -1,4 +1,10 @@
 # train.py
+# Training script for Siamese encoder and binary classifier on ISIC dataset.
+# Uses triplet loss for the Siamese network.
+
+
+
+
 from params import (MODELPATH, IMAGEPATH, EPOCHS_SIAMESE, EPOCHS_CLS,
                     TRIPLET_MARGIN, LR_SIAMESE, LR_CLS)
 from dataset import get_loaders

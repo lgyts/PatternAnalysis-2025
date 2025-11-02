@@ -11,24 +11,46 @@ It corresponds to COMP3710 Pattern Analysis 2025 – Project 9 (Hard).
 1. **Siamese Encoder Training**  
    - The encoder is a ResNet-50 backbone with its final fully-connected layer replaced by a 1000-D projection head.  
    - It is trained using TripletMarginLoss (margin = 1.0) on batches of triplets (anchor, positive, negative).  
-   - Training automatically saves:
-     - `images/siamese_loss_curve.png`: Siamese loss curve
-     - `images/triplet_examples.png`: Triplet visualisation (anchor, positive, negative)
    - Implemented in `train_siamese()` within `train.py`.
 
 2. **Feature Extraction and Classifier Training**  
    - The trained encoder is frozen to extract embeddings for all images.  
    - A 4-layer fully connected MLP classifier (LeakyReLU activations, CrossEntropy loss) is trained on these embeddings.  
-   - Automatically saves:
-     - `images/classifier_loss_curve.png`: Train vs validation loss curves.  
    - Implemented in `train_classifier()` within `train.py`.
 
 3. **Evaluation and Visualisation**  
    - `predict.py` loads checkpoints and evaluates on the test split.  
    - It prints accuracy, confusion matrix, and classification report.  
-   - Automatically saves:
-     - `images/test_examples_pred_vs_gt.png`: Input test images with true and predicted labels.
 
 ---
 
-## 3. Repository Structure
+## 4. Example Inputs, Outputs and Plots
+
+1. Siamese Network Architecture
+![Siamese Architecture](images/0_0VXErZ7GxhliRUGQ.webp)
+
+---
+
+2. Example Input Triplets
+![Triplet Examples](images/triplet_examples.png)
+
+---
+
+3. Siamese Training Loss
+![Siamese Loss Curve](images/loss_siamese.png)
+
+---
+
+4. Classifier Training and Validation Loss
+![Classifier Loss Curve](images/loss_classifier.png)
+
+---
+
+5. Classifier Validation Accuracy
+![Validation Accuracy](images/classifier_val_acc.png)
+
+---
+
+6. Final Test Predictions vs Ground Truth
+![Predicted vs Ground Truth Examples](images/test_examples_pred_vs_gt.png)
+

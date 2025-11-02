@@ -1,10 +1,14 @@
+# params.py
+# Parameters for dataset paths, training hyperparameters, and normalization stats.  
+
+
 DATAPATH = "./dataset"
 CSV_NAME = "train-metadata.csv"
 IMG_DIR = "train-image"
 
 SEED = 42
 TRAIN_FRAC, VAL_FRAC, TEST_FRAC = 0.7, 0.1, 0.2
-USE_GROUP_SPLIT = True   # if True, split by patient_id to avoid leakage
+USE_GROUP_SPLIT = True   
 
 BATCH_TRIPLET = 64
 BATCH_CLASSIF = 64

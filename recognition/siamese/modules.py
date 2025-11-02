@@ -1,3 +1,11 @@
+# modules.py
+# Siamese encoder and binary classifier modules for ISIC dataset recognition.
+# Provides:
+#   - SiameseEncoder: ResNet50-based encoder with projection head
+#   - BinaryClassifier: MLP for binary classification
+
+
+
 import torch
 import torch.nn as nn
 import torchvision.models as models
