@@ -54,3 +54,27 @@ It corresponds to COMP3710 Pattern Analysis 2025 – Project 9 (Hard).
 6. Final Test Predictions vs Ground Truth
 ![Predicted vs Ground Truth Examples](images/test_examples_pred_vs_gt.png)
 
+
+### Discussion
+
+The Siamese encoder successfully learned a discriminative embedding space, as shown by the rapid drop in triplet loss.  
+However, the classifier exhibited **clear overfitting**:
+
+- The **training loss** approaches zero, while **validation loss** begins to increase after approximately 20 epochs.  
+- The **validation accuracy** plateaus around **82%**, indicating moderate generalization.
+
+This suggests that although the model effectively learns feature representations, it may **memorize specific training samples** due to the limited dataset size.
+
+**Possible remedies:**
+- Apply stronger regularization techniques (e.g., weight decay, dropout).  
+- Increase the diversity of triplet sampling during training.  
+- Add more aggressive data augmentation (e.g., color jitter, Gaussian blur).  
+- Implement early stopping and learning rate scheduling to prevent overfitting.
+
+
+### Reference
+
+- Hadsell et al., *Dimensionality Reduction by Learning an Invariant Mapping*, CVPR 2006  
+- He et al., *Deep Residual Learning for Image Recognition*, CVPR 2016  
+- ISIC 2020 Challenge Dataset – https://challenge2020.isic-archive.com/  
+- NischayDNK, *ISIC 2020 JPG 256x256 Resized*, Kaggle Dataset – https://www.kaggle.com/datasets/nischaydnk/isic-2020-jpg-256x256-resized/data
