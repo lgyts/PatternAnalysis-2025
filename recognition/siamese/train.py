@@ -19,8 +19,11 @@ def train_siamese(encoder, train_loader, val_loader, device):
 
     tr_hist, va_hist = [], []
 
+    best_val = float('inf')
+    patience, waited = 5, 0  # early stop after 5 epochs without improvement
+
     for epoch in range(EPOCHS_SIAMESE):
-        #  train 
+        # train 
         encoder.train()
         train_sum = 0.0
         for anc, pos, neg, _ in train_loader:
@@ -31,7 +34,7 @@ def train_siamese(encoder, train_loader, val_loader, device):
             train_sum += loss.item()
         avg_tr = train_sum / max(1, len(train_loader))
 
-        # val 
+        # validation 
         encoder.eval()
         val_sum = 0.0
         with torch.no_grad():
@@ -44,8 +47,20 @@ def train_siamese(encoder, train_loader, val_loader, device):
 
         tr_hist.append(avg_tr)
         va_hist.append(avg_va)
+
         print(f"[Siamese] Epoch {epoch+1}/{EPOCHS_SIAMESE} "
               f"train_loss={avg_tr:.4f} val_loss={avg_va:.4f}")
+
+        # Early Stopping 
+        if avg_va < best_val - 0.001:  # min_delta=0.001
+            best_val = avg_va
+            waited = 0
+            torch.save(encoder.state_dict(), os.path.join(MODELPATH, "siamese_best.pth"))
+        else:
+            waited += 1
+            if waited >= patience:
+                print(f"[Siamese] Early stopping at epoch {epoch+1}")
+                break
 
     return tr_hist, va_hist
 
@@ -68,20 +83,20 @@ def extract_features(encoder, loader, device):
 
 #  classifier training on embeddings 
 def train_classifier(clf, train_data, val_data, device):
-    opt = torch.optim.Adam(
-      clf.parameters(),
-      lr=LR_CLS,
-      betas=(0.9, 0.999),
-      weight_decay=5e-4   # add L2
-    )
+    opt = torch.optim.Adam(clf.parameters(), lr=LR_CLS, betas=(0.9, 0.999), weight_decay=5e-4)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode='min', factor=0.5, patience=3)
     criterion = nn.CrossEntropyLoss()
+
     Xtr, ytr = train_data
     Xva, yva = val_data
 
     tr_hist, va_hist, va_acc_hist = [], [], []
 
+    best_val = float('inf')
+    patience, waited = 5, 0  # early stop after 5 epochs without improvement
+
     for epoch in range(EPOCHS_CLS):
-        # train
+        #  train
         clf.train()
         idx = torch.randperm(len(Xtr))
         Xb, yb = Xtr[idx].to(device), ytr[idx].to(device)
@@ -90,20 +105,31 @@ def train_classifier(clf, train_data, val_data, device):
         opt.zero_grad(); loss.backward(); opt.step()
         train_loss = loss.item()
 
-        # val
+        #  validation 
         clf.eval()
         with torch.no_grad():
             v_logits = clf(Xva.to(device))
             val_loss = criterion(v_logits, yva.to(device)).item()
             val_acc = (v_logits.argmax(1).cpu() == yva).float().mean().item()
+        scheduler.step(val_loss)
 
         tr_hist.append(train_loss)
         va_hist.append(val_loss)
         va_acc_hist.append(val_acc)
 
         print(f"[CLS] Epoch {epoch+1}/{EPOCHS_CLS} "
-              f"train_loss={train_loss:.4f} "
-              f"val_loss={val_loss:.4f} val_acc={val_acc*100:.2f}%")
+              f"train_loss={train_loss:.4f} val_loss={val_loss:.4f} val_acc={val_acc*100:.2f}%")
+
+        # Early Stopping 
+        if val_loss < best_val - 0.001:  # min_delta=0.001
+            best_val = val_loss
+            waited = 0
+            torch.save(clf.state_dict(), os.path.join(MODELPATH, "classifier_best.pth"))
+        else:
+            waited += 1
+            if waited >= patience:
+                print(f"[CLS] Early stopping at epoch {epoch+1}")
+                break
 
     return tr_hist, va_hist, va_acc_hist
 
@@ -112,7 +138,8 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print("Device:", device)
 
-    loaders   = get_loaders()  
+    # Load datasets 
+    loaders   = get_loaders()
     tri_train = loaders["triplet_train"]
     tri_val   = loaders["triplet_val"]
     cls_tr    = loaders["classif_train"]
@@ -122,62 +149,81 @@ def main():
     ensure_dir(MODELPATH)
     ensure_dir(IMAGEPATH)
 
-    # 1) Siamese encoder
+    # Siamese encoder 
     encoder = SiameseEncoder(out_dim=512).to(device)
-    enc_path = os.path.join(MODELPATH, "siamese.pth")
-    if os.path.exists(enc_path):
-        encoder.load_state_dict(torch.load(enc_path, map_location=device))
-        print(f"[INFO] Loaded existing encoder: {enc_path}")
-        siam_tr_hist, siam_va_hist = [], []  
-    else:
-        siam_tr_hist, siam_va_hist = train_siamese(encoder, tri_train, tri_val, device)
-        torch.save(encoder.state_dict(), enc_path)
-        print(f"[INFO] Saved encoder to {enc_path}")
+    enc_path_best = os.path.join(MODELPATH, "siamese_best.pth")
+    enc_path_last = os.path.join(MODELPATH, "siamese.pth")
 
-        # Siamese loss (train/val)
+    if os.path.exists(enc_path_best):
+        encoder.load_state_dict(torch.load(enc_path_best, map_location=device))
+        print(f"[INFO] Loaded best Siamese encoder: {enc_path_best}")
+        siam_tr_hist, siam_va_hist = [], []
+    else:
+        print("[INFO] Training new Siamese encoder...")
+        siam_tr_hist, siam_va_hist = train_siamese(encoder, tri_train, tri_val, device)
+        torch.save(encoder.state_dict(), enc_path_last)
+        print(f"[INFO] Saved last Siamese encoder to: {enc_path_last}")
+
+        # plot Siamese loss
         xs = list(range(1, len(siam_tr_hist) + 1))
         plot_lines(xs, [siam_tr_hist, siam_va_hist], ["Training", "Validation"],
                    title="Loss of the Siamese Network",
-                   xlabel="Epochs", ylabel="Loss",
+                   xlabel="Epochs", ylabel="Triplet Loss",
                    save_path=os.path.join(IMAGEPATH, "siamese_loss.png"))
 
-    # Extract embeddings for classifier
+        if os.path.exists(enc_path_best):
+            print("[INFO] Early stopping saved Siamese best model.")
+
+    # Feature extraction 
+    print("[INFO] Extracting embeddings...")
+    encoder.eval()
     Xtr, ytr = extract_features(encoder, cls_tr, device)
     Xva, yva = extract_features(encoder, cls_va, device)
     Xte, yte = extract_features(encoder, cls_te, device)
 
-    # Classifier
+    #  Binary classifier 
     clf = BinaryClassifier(in_dim=512).to(device)
-    clf_path = os.path.join(MODELPATH, "classifier.pth")
-    if os.path.exists(clf_path):
-        clf.load_state_dict(torch.load(clf_path, map_location=device))
-        print(f"[INFO] Loaded existing classifier: {clf_path}")
+    clf_path_best = os.path.join(MODELPATH, "classifier_best.pth")
+    clf_path_last = os.path.join(MODELPATH, "classifier.pth")
+
+    if os.path.exists(clf_path_best):
+        clf.load_state_dict(torch.load(clf_path_best, map_location=device))
+        print(f"[INFO] Loaded best classifier: {clf_path_best}")
         cls_tr_hist, cls_va_hist = [], []
     else:
+        print("[INFO] Training new classifier...")
         cls_tr_hist, cls_va_hist, _ = train_classifier(clf, (Xtr, ytr), (Xva, yva), device)
-        torch.save(clf.state_dict(), clf_path)
-        print(f"[INFO] Saved classifier to {clf_path}")
+        torch.save(clf.state_dict(), clf_path_last)
+        print(f"[INFO] Saved last classifier to: {clf_path_last}")
 
-        # Classifier loss (train/val)
+        # plot classifier loss
         xs = list(range(1, len(cls_tr_hist) + 1))
         plot_lines(xs, [cls_tr_hist, cls_va_hist], ["Training", "Validation"],
                    title="Loss of the Binary Classifier",
-                   xlabel="Epochs", ylabel="Loss",
+                   xlabel="Epochs", ylabel="CrossEntropy Loss",
                    save_path=os.path.join(IMAGEPATH, "classifier_loss.png"))
 
-    # 4) Test once + Confusion Matrix
+        if os.path.exists(clf_path_best):
+            print("[INFO] Early stopping saved classifier best model.")
+
+    #  Evaluation 
+    print("[INFO] Evaluating classifier on test set...")
+    if os.path.exists(clf_path_best):
+        clf.load_state_dict(torch.load(clf_path_best, map_location=device))
     clf.eval()
     with torch.no_grad():
-        pred = clf(Xte.to(device)).argmax(1).cpu()
-    test_acc = (pred == yte).float().mean().item()
-    cm = confusion_matrix(yte.numpy(), pred.numpy())
+        preds = clf(Xte.to(device)).argmax(1).cpu()
+    test_acc = (preds == yte).float().mean().item()
+    cm = confusion_matrix(yte.numpy(), preds.numpy())
     print(f"[TEST] Accuracy: {test_acc*100:.2f}%")
     print("[TEST] Confusion Matrix:\n", cm)
 
+    # plot confusion matrix
     plot_confusion_matrix(cm, classes=["Benign", "Malignant"],
                           save_path=os.path.join(IMAGEPATH, "confusion_matrix.png"))
 
-    print("[INFO] Saved plots to:", IMAGEPATH)
+    print(f"[INFO] All results saved to: {IMAGEPATH}")
+
 
 
 if __name__ == "__main__":

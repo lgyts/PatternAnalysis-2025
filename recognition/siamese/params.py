@@ -16,8 +16,8 @@ STD  = [0.5, 0.5, 0.5]
 
 # training hyperparameters
 TRIPLET_MARGIN = 1.0
-EPOCHS_SIAMESE = 40
-EPOCHS_CLS     = 20
+EPOCHS_SIAMESE = 100
+EPOCHS_CLS     = 100
 LR_SIAMESE     = 0.0001
 LR_CLS         = 0.0005
 
