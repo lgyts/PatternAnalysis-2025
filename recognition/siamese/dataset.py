@@ -181,17 +181,28 @@ class ISICTripletDataset(Dataset):
 
 # ---------- Transforms ----------
 def build_transforms(image_size: int = 256):
+    # add color jitter for increased robustness
+    color_jitter = T.ColorJitter(
+        brightness=0.1,   
+        contrast=0.1,     
+        saturation=0.05,   
+        hue=0.02          
+    )
+
     train_tfm = T.Compose([
         T.RandomHorizontalFlip(p=0.5),
         T.RandomVerticalFlip(p=0.5),
         T.RandomRotation(degrees=15),
+        color_jitter,     
         T.ToTensor(),
         T.Normalize(mean=MEAN, std=STD),
     ])
+
     eval_tfm = T.Compose([
         T.ToTensor(),
         T.Normalize(mean=MEAN, std=STD),
     ])
+
     return train_tfm, eval_tfm
 
 
