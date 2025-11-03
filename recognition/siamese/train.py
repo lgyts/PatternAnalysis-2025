@@ -6,50 +6,12 @@ from modules import SiameseEncoder, BinaryClassifier
 import os
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
-import matplotlib.pyplot as plt
-import numpy as np
 from sklearn.metrics import confusion_matrix
 
-
-# ---------- small utils ----------
-def _ensure_dir(path: str):
-    os.makedirs(path, exist_ok=True)
-
-def _plot_lines(xs, ys_list, labels, title, xlabel, ylabel, save_path):
-    plt.figure()
-    for ys, lb in zip(ys_list, labels):
-        plt.plot(xs, ys, label=lb)
-    if labels:
-        plt.legend()
-    plt.title(title)
-    plt.xlabel(xlabel)
-    plt.ylabel(ylabel)
-    plt.tight_layout()
-    _ensure_dir(os.path.dirname(save_path))
-    plt.savefig(save_path, dpi=200)
-    plt.close()
-
-def _plot_confusion_matrix(cm, classes, save_path):
-    plt.figure()
-    im = plt.imshow(cm, interpolation='nearest', cmap='viridis')
-    plt.colorbar(im)
-    tick_marks = np.arange(len(classes))
-    plt.xticks(tick_marks, classes)
-    plt.yticks(tick_marks, classes)
-    # numbers
-    for i in range(cm.shape[0]):
-        for j in range(cm.shape[1]):
-            plt.text(j, i, f"{cm[i, j]}", ha="center", va="center", color="orange")
-    plt.ylabel('True label')
-    plt.xlabel('Predicted label')
-    plt.tight_layout()
-    _ensure_dir(os.path.dirname(save_path))
-    plt.savefig(save_path, dpi=200)
-    plt.close()
+from utils import ensure_dir, plot_lines, plot_confusion_matrix
 
 
-# ---------- Siamese training (Triplet loss) ----------
+#  Siamese training (Triplet loss) 
 def train_siamese(encoder, train_loader, val_loader, device):
     encoder.train()
     opt = torch.optim.Adam(encoder.parameters(), lr=LR_SIAMESE, betas=(0.9, 0.999))
@@ -58,7 +20,7 @@ def train_siamese(encoder, train_loader, val_loader, device):
     tr_hist, va_hist = [], []
 
     for epoch in range(EPOCHS_SIAMESE):
-        # train
+        #  train 
         encoder.train()
         train_sum = 0.0
         for anc, pos, neg, _ in train_loader:
@@ -69,7 +31,7 @@ def train_siamese(encoder, train_loader, val_loader, device):
             train_sum += loss.item()
         avg_tr = train_sum / max(1, len(train_loader))
 
-        # val
+        # val 
         encoder.eval()
         val_sum = 0.0
         with torch.no_grad():
@@ -88,7 +50,7 @@ def train_siamese(encoder, train_loader, val_loader, device):
     return tr_hist, va_hist
 
 
-# ---------- feature extraction ----------
+#  feature extraction 
 @torch.no_grad()
 def extract_features(encoder, loader, device):
     encoder.eval()
@@ -104,7 +66,7 @@ def extract_features(encoder, loader, device):
     return torch.cat(xs), torch.cat(ys)
 
 
-# ---------- classifier training on embeddings ----------
+#  classifier training on embeddings 
 def train_classifier(clf, train_data, val_data, device):
     opt = torch.optim.Adam(clf.parameters(), lr=LR_CLS, betas=(0.9, 0.999))
     criterion = nn.CrossEntropyLoss()
@@ -152,16 +114,16 @@ def main():
     cls_va    = loaders["classif_val"]
     cls_te    = loaders["classif_test"]
 
-    _ensure_dir(MODELPATH)
-    _ensure_dir(IMAGEPATH)
+    ensure_dir(MODELPATH)
+    ensure_dir(IMAGEPATH)
 
-    # Siamese encoder
+    # 1) Siamese encoder
     encoder = SiameseEncoder(out_dim=1000).to(device)
     enc_path = os.path.join(MODELPATH, "siamese.pth")
     if os.path.exists(enc_path):
         encoder.load_state_dict(torch.load(enc_path, map_location=device))
         print(f"[INFO] Loaded existing encoder: {enc_path}")
-        siam_tr_hist, siam_va_hist = [], [] 
+        siam_tr_hist, siam_va_hist = [], []  
     else:
         siam_tr_hist, siam_va_hist = train_siamese(encoder, tri_train, tri_val, device)
         torch.save(encoder.state_dict(), enc_path)
@@ -169,17 +131,17 @@ def main():
 
         # Siamese loss (train/val)
         xs = list(range(1, len(siam_tr_hist) + 1))
-        _plot_lines(xs, [siam_tr_hist, siam_va_hist], ["Training", "Validation"],
-                    title="Loss of the Siamese Network",
-                    xlabel="Epochs", ylabel="Loss",
-                    save_path=os.path.join(IMAGEPATH, "siamese_loss.png"))
+        plot_lines(xs, [siam_tr_hist, siam_va_hist], ["Training", "Validation"],
+                   title="Loss of the Siamese Network",
+                   xlabel="Epochs", ylabel="Loss",
+                   save_path=os.path.join(IMAGEPATH, "siamese_loss.png"))
 
-    #  Extract embeddings for classifier
+    # Extract embeddings for classifier
     Xtr, ytr = extract_features(encoder, cls_tr, device)
     Xva, yva = extract_features(encoder, cls_va, device)
     Xte, yte = extract_features(encoder, cls_te, device)
 
-    #  Classifier
+    # Classifier
     clf = BinaryClassifier(in_dim=1000).to(device)
     clf_path = os.path.join(MODELPATH, "classifier.pth")
     if os.path.exists(clf_path):
@@ -193,10 +155,10 @@ def main():
 
         # Classifier loss (train/val)
         xs = list(range(1, len(cls_tr_hist) + 1))
-        _plot_lines(xs, [cls_tr_hist, cls_va_hist], ["Training", "Validation"],
-                    title="Loss of the Binary Classifier",
-                    xlabel="Epochs", ylabel="Loss",
-                    save_path=os.path.join(IMAGEPATH, "classifier_loss.png"))
+        plot_lines(xs, [cls_tr_hist, cls_va_hist], ["Training", "Validation"],
+                   title="Loss of the Binary Classifier",
+                   xlabel="Epochs", ylabel="Loss",
+                   save_path=os.path.join(IMAGEPATH, "classifier_loss.png"))
 
     # 4) Test once + Confusion Matrix
     clf.eval()
@@ -207,8 +169,8 @@ def main():
     print(f"[TEST] Accuracy: {test_acc*100:.2f}%")
     print("[TEST] Confusion Matrix:\n", cm)
 
-    _plot_confusion_matrix(cm, classes=["Benign", "Malignant"],
-                           save_path=os.path.join(IMAGEPATH, "confusion_matrix.png"))
+    plot_confusion_matrix(cm, classes=["Benign", "Malignant"],
+                          save_path=os.path.join(IMAGEPATH, "confusion_matrix.png"))
 
     print("[INFO] Saved plots to:", IMAGEPATH)
 
