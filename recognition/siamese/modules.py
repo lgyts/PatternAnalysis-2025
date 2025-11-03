@@ -4,7 +4,7 @@ import torchvision.models as models
 
 class SiameseEncoder(nn.Module):
     # use ResNet50 as backbone for feature extraction
-    def __init__(self, out_dim=1000, pretrained=True):
+    def __init__(self, out_dim=512, pretrained=True):
         super().__init__()
         base = models.resnet50(weights=models.ResNet50_Weights.DEFAULT if pretrained else None)
         feat_dim = base.fc.in_features
@@ -20,7 +20,7 @@ class SiameseEncoder(nn.Module):
     
 class BinaryClassifier(nn.Module):
     # 4 layer MLP for binary classification, with LeakyReLU activations
-    def __init__(self, in_dim=1000, hidden=(512, 256, 64), num_classes=2,
+    def __init__(self, in_dim=512, hidden=(256, 64, 32), num_classes=2,
                  negative_slope=0.01, p=0.4):  # add p
         super().__init__()
         layers = []

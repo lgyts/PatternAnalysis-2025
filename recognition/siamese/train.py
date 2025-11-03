@@ -123,7 +123,7 @@ def main():
     ensure_dir(IMAGEPATH)
 
     # 1) Siamese encoder
-    encoder = SiameseEncoder(out_dim=1000).to(device)
+    encoder = SiameseEncoder(out_dim=512).to(device)
     enc_path = os.path.join(MODELPATH, "siamese.pth")
     if os.path.exists(enc_path):
         encoder.load_state_dict(torch.load(enc_path, map_location=device))
@@ -147,7 +147,7 @@ def main():
     Xte, yte = extract_features(encoder, cls_te, device)
 
     # Classifier
-    clf = BinaryClassifier(in_dim=1000).to(device)
+    clf = BinaryClassifier(in_dim=512).to(device)
     clf_path = os.path.join(MODELPATH, "classifier.pth")
     if os.path.exists(clf_path):
         clf.load_state_dict(torch.load(clf_path, map_location=device))
