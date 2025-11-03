@@ -68,7 +68,12 @@ def extract_features(encoder, loader, device):
 
 #  classifier training on embeddings 
 def train_classifier(clf, train_data, val_data, device):
-    opt = torch.optim.Adam(clf.parameters(), lr=LR_CLS, betas=(0.9, 0.999))
+    opt = torch.optim.Adam(
+      clf.parameters(),
+      lr=LR_CLS,
+      betas=(0.9, 0.999),
+      weight_decay=5e-4   # add L2
+    )
     criterion = nn.CrossEntropyLoss()
     Xtr, ytr = train_data
     Xva, yva = val_data
