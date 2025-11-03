@@ -1,15 +1,15 @@
 # ISIC 2020 (preprocessed, 256x256) dataset utils
 # Provides:
-#   - ISICTable: read & split & balance
-#   - ISICImageDataset: (image, label, idx)
-#   - ISICTripletDataset: (anchor, positive, negative, anchor_label)
-#   - get_loaders(): build DataLoaders for triplet-training & classifier
+# - ISICTable: load and split metadata table
+# - ISICImageDataset: standard image dataset for classification
+# - ISICTripletDataset: triplet dataset for siamese training
+# - get_loaders: prepare DataLoader objects for training and evaluation
+# Author: s4778251
 
 import os
 import random
 from pathlib import Path
 from typing import Tuple, Optional, List
-
 import pandas as pd
 from PIL import Image
 from sklearn.model_selection import StratifiedShuffleSplit, GroupShuffleSplit
@@ -17,67 +17,71 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms as T
 
-try:
-    # parameters are stored in params.py
-    from params import (
-        DATAPATH, CSV_NAME, IMG_DIR, SEED,
-        TRAIN_FRAC, VAL_FRAC, TEST_FRAC, USE_GROUP_SPLIT,
-        BATCH_TRIPLET, BATCH_CLASSIF, NUM_WORKERS, MEAN, STD
-    )
-except Exception:
-    DATAPATH = "./dataset"
-    CSV_NAME = "train-metadata.csv"
-    IMG_DIR = "train-image"
-    SEED = 42
-    TRAIN_FRAC, VAL_FRAC, TEST_FRAC = 0.7, 0.1, 0.2
-    USE_GROUP_SPLIT = False
-    BATCH_TRIPLET, BATCH_CLASSIF = 64, 64
-    NUM_WORKERS = 4
-    MEAN, STD = [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]
+from params import (
+    DATAPATH, CSV_NAME, IMG_DIR, SEED,
+    TRAIN_FRAC, VAL_FRAC, TEST_FRAC, USE_GROUP_SPLIT,
+    BATCH_TRIPLET, BATCH_CLASSIF, NUM_WORKERS,
+    MEAN, STD, IMAGE_SIZE, ROT_DEG, FLIP_PROB, COLOR_JITTER
+)
 
 
-# ---------- Core table utils ----------
 class ISICTable:
-    """Load metadata, materialize filepaths, split and balance to 1:1."""
-    def __init__(self, root: str, csv_name: str = CSV_NAME, image_dir: str = IMG_DIR):
-        self.root = Path(root)
+    """Handle ISIC2020 metadata table loading, cleaning, and splitting."""
 
+    def __init__(self, root: str, csv_name: str = CSV_NAME, image_dir: str = IMG_DIR):
+        """Load and preprocess ISIC metadata table.
+
+        Args:
+            root (str): Root directory containing CSV and image folder.
+            csv_name (str): Name of the CSV file with metadata.
+            image_dir (str): Subdirectory containing images.
+        """
+        self.root = Path(root)
         df = pd.read_csv(self.root / csv_name)
+        
+        # Remove unnamed index column if present (common artifact from CSV export)
         if df.columns[0].lower().startswith("unnamed"):
             df = df.drop(columns=[df.columns[0]])
-
-        # normalize column names
+        
+        # Normalize column names and keep only relevant ones
         df.columns = [c.strip().lower() for c in df.columns]
         df = df[["isic_id", "patient_id", "target"]]
 
-        # directly map .jpg filepaths
+        # Construct image file paths
         img_dir_path = self.root / image_dir / "image"
-        df["filepath"] = df["isic_id"].astype(str).apply(
-            lambda x: str(img_dir_path / f"{x}.jpg")
-        )
+        df["filepath"] = df["isic_id"].astype(str).apply(lambda x: str(img_dir_path / f"{x}.jpg"))
 
-        # keep only existing files
+        # Keep only existing image files
         df = df[df["filepath"].apply(os.path.exists)].reset_index(drop=True)
         df["target"] = df["target"].astype(int)
-
+        
         if len(df) == 0:
-            raise RuntimeError(
-                f"No .jpg images found in {img_dir_path}. "
-                "Check directory level and filename consistency."
-            )
-
+            raise RuntimeError(f"No .jpg images found in {img_dir_path}.")
         self.df = df
         print(f"[INFO] Loaded {len(df)} samples from {csv_name}")
 
+    
     def _split_no_group(self, train: float, val: float, seed: int):
+        """Perform stratified split without grouping by patient IDs.
+
+        Args:
+            train (float): Training set fraction.
+            val (float): Validation set fraction.
+            seed (int): Random seed.
+
+        Returns:
+            tuple(pd.DataFrame): (train_df, val_df, test_df)
+        """
         y = self.df["target"].values
+        
+        # First split into train and (val+test)
         sss = StratifiedShuffleSplit(n_splits=1, train_size=train, random_state=seed)
         train_idx, temp_idx = next(sss.split(self.df, y))
         temp = self.df.iloc[temp_idx]
         y_temp = temp["target"].values
-        sss2 = StratifiedShuffleSplit(
-            n_splits=1, train_size=val / (1.0 - train), random_state=seed
-        )
+        
+        # Split remaining into validation and test
+        sss2 = StratifiedShuffleSplit(n_splits=1, train_size=val / (1.0 - train), random_state=seed)
         val_rel, test_rel = next(sss2.split(temp, y_temp))
         val_idx = temp.index[val_rel]
         test_idx = temp.index[test_rel]
@@ -87,17 +91,30 @@ class ISICTable:
             self.df.loc[test_idx].reset_index(drop=True),
         )
 
+    
     def _split_with_group(self, train: float, val: float, seed: int):
+        """Perform group-aware split by patient IDs.
+
+        Args:
+            train (float): Training set fraction.
+            val (float): Validation set fraction.
+            seed (int): Random seed.
+
+        Returns:
+            tuple(pd.DataFrame): (train_df, val_df, test_df)
+        """
         y = self.df["target"].values
         groups = self.df["patient_id"].astype(str).values
+        
+        # Train / temp split using group-level shuffle
         gss = GroupShuffleSplit(n_splits=1, train_size=train, random_state=seed)
         train_idx, temp_idx = next(gss.split(self.df, y, groups))
         temp = self.df.iloc[temp_idx]
         y_temp = temp["target"].values
         groups_temp = temp["patient_id"].astype(str).values
-        gss2 = GroupShuffleSplit(
-            n_splits=1, train_size=val / (1.0 - train), random_state=seed
-        )
+        
+        # Split remaining into validation and test
+        gss2 = GroupShuffleSplit(n_splits=1, train_size=val / (1.0 - train), random_state=seed)
         val_rel, test_rel = next(gss2.split(temp, y_temp, groups_temp))
         val_idx = temp.index[val_rel]
         test_idx = temp.index[test_rel]
@@ -107,15 +124,38 @@ class ISICTable:
             self.df.loc[test_idx].reset_index(drop=True),
         )
 
+    
     def split(self, train=TRAIN_FRAC, val=VAL_FRAC, test=TEST_FRAC,
               use_group: bool = USE_GROUP_SPLIT, seed: int = SEED):
-        assert abs(train + val + test - 1.0) < 1e-6, "Fractions must sum to 1."
+        """Split the dataset into train, validation, and test sets.
+
+        Args:
+            train (float): Fraction for training set.
+            val (float): Fraction for validation set.
+            test (float): Fraction for test set.
+            use_group (bool): Whether to use group-aware splitting.
+            seed (int): Random seed.
+
+        Returns:
+            tuple(pd.DataFrame): (train_df, val_df, test_df)
+        """
+        assert abs(train + val + test - 1.0) < 1e-6  # sanity check
         if use_group and "patient_id" in self.df.columns:
             return self._split_with_group(train, val, seed)
         return self._split_no_group(train, val, seed)
     
+    
     @staticmethod
     def balance_1to1(df: pd.DataFrame, seed: int = SEED) -> pd.DataFrame:
+        """Balance dataset to a 1:1 ratio between positive and negative samples.
+
+        Args:
+            df (pd.DataFrame): Input dataframe with 'target' column.
+            seed (int): Random seed.
+
+        Returns:
+            pd.DataFrame: Balanced dataframe.
+        """
         pos = df[df["target"] == 1]
         neg = df[df["target"] == 0]
         if len(pos) == 0 or len(neg) == 0:
@@ -128,17 +168,26 @@ class ISICTable:
         return out.reset_index(drop=True)
     
 
-# ---------- Image dataset ----------
 class ISICImageDataset(Dataset):
-    """Return (image, label, index) for classifier or embedding extraction."""
+    """Torch dataset for standard classification mode."""
+
     def __init__(self, df: pd.DataFrame, transform=None):
         self.df = df.reset_index(drop=True)
         self.tfm = transform
-
+    
     def __len__(self) -> int:
+        """Return number of samples."""
         return len(self.df)
-
+    
     def __getitem__(self, i: int):
+        """Load and transform the i-th sample.
+
+        Args:
+            i (int): Sample index.
+
+        Returns:
+            tuple(torch.Tensor, int, int): (image, label, index)
+        """
         row = self.df.iloc[i]
         img = Image.open(row["filepath"]).convert("RGB")
         if self.tfm:
@@ -147,12 +196,14 @@ class ISICImageDataset(Dataset):
         return img, label, i
 
 
-# ---------- Triplet dataset ----------
 class ISICTripletDataset(Dataset):
-    """Return (anchor, positive, negative, anchor_label) for triplet loss."""
+    """Torch dataset for triplet generation (anchor, positive, negative)."""
+
     def __init__(self, df: pd.DataFrame, transform=None, seed: int = SEED):
         self.df = df.reset_index(drop=True)
         self.tfm = transform
+        
+        # Index samples by class for easy positive/negative sampling
         self.by_cls = {
             0: self.df[self.df["target"] == 0].index.tolist(),
             1: self.df[self.df["target"] == 1].index.tolist(),
@@ -163,15 +214,21 @@ class ISICTripletDataset(Dataset):
         return len(self.df)
 
     def _load(self, idx: int):
+        """Load one image by its index and apply transforms if defined."""
         path = self.df.iloc[idx]["filepath"]
         img = Image.open(path).convert("RGB")
         return self.tfm(img) if self.tfm else img
 
     def __getitem__(self, i: int):
+        """Return a triplet (anchor, positive, negative, label)."""
         anc_row = self.df.iloc[i]
         y = int(anc_row["target"])
+        
+        # Pick a positive sample from same class (not itself)
         same = [j for j in self.by_cls[y] if j != i]
         pos_idx = random.choice(same) if same else i
+        
+        # Pick a negative sample from opposite class
         neg_idx = random.choice(self.by_cls[1 - y])
         anc = self._load(i)
         pos = self._load(pos_idx)
@@ -179,34 +236,23 @@ class ISICTripletDataset(Dataset):
         return anc, pos, neg, y
     
 
-# ---------- Transforms ----------
-def build_transforms(image_size: int = 256):
-    # add color jitter for increased robustness
-    color_jitter = T.ColorJitter(
-        brightness=0.1,   
-        contrast=0.1,     
-        saturation=0.05,   
-        hue=0.02          
-    )
-
+def build_transforms(image_size: int = IMAGE_SIZE):
+    """Create image transformations for training and evaluation."""
     train_tfm = T.Compose([
-        T.RandomHorizontalFlip(p=0.5),
-        T.RandomVerticalFlip(p=0.5),
-        T.RandomRotation(degrees=15),
-        color_jitter,     
+        T.RandomHorizontalFlip(p=FLIP_PROB),
+        T.RandomVerticalFlip(p=FLIP_PROB),
+        T.RandomRotation(degrees=ROT_DEG),
+        T.ColorJitter(**COLOR_JITTER),
         T.ToTensor(),
         T.Normalize(mean=MEAN, std=STD),
     ])
-
     eval_tfm = T.Compose([
         T.ToTensor(),
         T.Normalize(mean=MEAN, std=STD),
     ])
-
     return train_tfm, eval_tfm
 
 
-# ---------- Loaders ----------
 def get_loaders(
     dataroot: str = DATAPATH,
     balance_each_split: bool = True,
@@ -215,61 +261,54 @@ def get_loaders(
     batch_classif: int = BATCH_CLASSIF,
     num_workers: int = NUM_WORKERS,
 ):
-    """
+    """Build dataloaders for Siamese and classification training.
+
+    Args:
+        dataroot (str): Root dataset directory.
+        balance_each_split (bool): Whether to balance classes in each split.
+        use_group_split (bool): Whether to use patient-based group splitting.
+        batch_triplet (int): Batch size for triplet dataloader.
+        batch_classif (int): Batch size for classification dataloader.
+        num_workers (int): Number of parallel data-loading workers.
+
     Returns:
-        dict with keys:
-          'triplet_train', 'triplet_val',
-          'classif_train', 'classif_val', 'classif_test'
-        Each value is a DataLoader.
+        dict[str, torch.utils.data.DataLoader]: Dictionary of dataloaders.
     """
     table = ISICTable(dataroot, CSV_NAME, IMG_DIR)
-    tr_df, va_df, te_df = table.split(
-        train=TRAIN_FRAC, val=VAL_FRAC, test=TEST_FRAC,
-        use_group=use_group_split, seed=SEED
-    )
-
+    tr_df, va_df, te_df = table.split(train=TRAIN_FRAC, val=VAL_FRAC, test=TEST_FRAC,
+                                      use_group=use_group_split, seed=SEED)
     if balance_each_split:
         tr_df = ISICTable.balance_1to1(tr_df, seed=SEED)
         va_df = ISICTable.balance_1to1(va_df, seed=SEED)
         te_df = ISICTable.balance_1to1(te_df, seed=SEED)
 
-    tfm_train, tfm_eval = build_transforms(image_size=256)
+    tfm_train, tfm_eval = build_transforms(image_size=IMAGE_SIZE)
 
-    # Triplet loaders (train + val)
+    # Datasets for Siamese training
     ds_triplet = ISICTripletDataset(tr_df, transform=tfm_train, seed=SEED)
-    dl_triplet = DataLoader(
-        ds_triplet, batch_size=batch_triplet, shuffle=True,
-        num_workers=num_workers, pin_memory=True, drop_last=True
-    )
+    dl_triplet = DataLoader(ds_triplet, batch_size=batch_triplet, shuffle=True,
+                            num_workers=num_workers, pin_memory=True, drop_last=True)
 
-    ds_triplet_val = ISICTripletDataset(va_df, transform=tfm_eval, seed=SEED)
-    dl_triplet_val = DataLoader(
-        ds_triplet_val, batch_size=batch_triplet, shuffle=False,
-        num_workers=num_workers, pin_memory=True, drop_last=False
-    )
+    ds_val_triplet = ISICTripletDataset(va_df, transform=tfm_eval, seed=SEED)
+    dl_val_triplet = DataLoader(ds_val_triplet, batch_size=batch_triplet, shuffle=False,
+                                num_workers=num_workers, pin_memory=True, drop_last=False)
 
-    # Classifier loaders (feature extractor -> classifier)
+    # Datasets for classification
     ds_tr_cls = ISICImageDataset(tr_df, transform=tfm_train)
     ds_va_cls = ISICImageDataset(va_df, transform=tfm_eval)
     ds_te_cls = ISICImageDataset(te_df, transform=tfm_eval)
 
-    dl_tr_cls = DataLoader(
-        ds_tr_cls, batch_size=batch_classif, shuffle=True,
-        num_workers=num_workers, pin_memory=True, drop_last=False
-    )
-    dl_va_cls = DataLoader(
-        ds_va_cls, batch_size=batch_classif, shuffle=False,
-        num_workers=num_workers, pin_memory=True, drop_last=False
-    )
-    dl_te_cls = DataLoader(
-        ds_te_cls, batch_size=batch_classif, shuffle=False,
-        num_workers=num_workers, pin_memory=True, drop_last=False
-    )
+    dl_tr_cls = DataLoader(ds_tr_cls, batch_size=batch_classif, shuffle=True,
+                           num_workers=num_workers, pin_memory=True)
+    dl_va_cls = DataLoader(ds_va_cls, batch_size=batch_classif, shuffle=False,
+                           num_workers=num_workers, pin_memory=True)
+    dl_te_cls = DataLoader(ds_te_cls, batch_size=batch_classif, shuffle=False,
+                           num_workers=num_workers, pin_memory=True)
 
     return {
         "triplet_train": dl_triplet,
-        "triplet_val":   dl_triplet_val,   # add validation loader
+        "triplet_val": dl_val_triplet,
         "classif_train": dl_tr_cls,
-        "classif_val":   dl_va_cls,
-        "classif_test":  dl_te_cls,
+        "classif_val": dl_va_cls,
+        "classif_test": dl_te_cls,
     }
