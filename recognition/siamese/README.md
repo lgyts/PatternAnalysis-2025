@@ -94,6 +94,10 @@ Tested on Google Colab (CUDA 12.6).
 
 All preprocessing configurations and split ratios are defined in `params.py` for reproducibility.
 
+### Justification of Data Splits
+A 70 / 10 / 20 (train / validation / test) split was selected to maintain a balance between model generalization and evaluation stability.  
+Group-based splitting by `patient_id` prevents data leakage between training and test sets, as multiple images can originate from the same patient.  
+
 
 
 ## Training and Testing
@@ -104,7 +108,7 @@ Before running, ensure that the working directory is correctly set to the projec
 
 ### Train Both Networks
 %cd /content/siamese
-!python predict.py
+!python train.py
 
 #### This command will:
 - Train the Siamese encoder using **Triplet Margin Loss**  
@@ -124,7 +128,7 @@ Before running, ensure that the working directory is correctly set to the projec
 
 
 
-## Example Outputs
+## Visual Results
 
 **1. Siamese Network Training Loss**  
 <p align="center">
@@ -223,20 +227,19 @@ weighted avg       0.81      0.81      0.81       272
 
 
 
-## Results Summary
+## Discussion and Future Work
 
-The Siamese encoder converged quickly with early stopping after 14 epochs, showing effective embedding learning.  
-The binary classifier achieved stable convergence with around **82% validation accuracy** and **81% test accuracy**. 
-The model demonstrates balanced precision and recall across classes, meeting the project goal of approximately 80% overall accuracy.
+The Siamese encoder successfully learned a discriminative embedding space, as reflected by the steadily decreasing triplet loss during training.  
+However, the validation loss showed noticeable oscillation, suggesting that the triplet sampling strategy may not consistently produce informative anchor–positive–negative pairs.  
+While the classifier achieved stable convergence and balanced performance (precision and recall ≈ 0.8), the overall accuracy plateaued around 81–82%, indicating that generalization to unseen samples remains limited.
 
+Several factors may explain these observations:
+- The dataset exhibits **class imbalance** and **intra-class variability**, which can make triplet formation unstable.  
+- The **triplet margin** and **sampling strategy** were fixed throughout training, potentially limiting the diversity of hard examples.  
 
-## Future Work
-
-- Improve triplet diversity using **hard negative mining** to reduce validation instability.  
-- Address dataset imbalance with **class-weighted loss** or **balanced sampling**.  
-- Visualize learned embeddings using **t-SNE** or **UMAP**.  
-- Fine-tune upper layers of **ResNet-50** for domain-specific features.  
-- Experiment with **alternative loss functions** (e.g., ArcFace, Contrastive Loss) for better embedding separation.
+**Future Work**
+- Implement **hard or semi-hard negative mining** to improve triplet selection and reduce validation fluctuation.  
+- Explore **alternative metric learning losses** (e.g., ArcFace, Contrastive Loss) to enhance inter-class margins and improve embedding quality.
 
 
 ## References
