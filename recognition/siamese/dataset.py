@@ -18,7 +18,7 @@ from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms as T
 
 try:
-    #  parameters are stored in params.py
+    # parameters are stored in params.py
     from params import (
         DATAPATH, CSV_NAME, IMG_DIR, SEED,
         TRAIN_FRAC, VAL_FRAC, TEST_FRAC, USE_GROUP_SPLIT,
@@ -36,7 +36,7 @@ except Exception:
     MEAN, STD = [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]
 
 
-#  Core table utils 
+# ---------- Core table utils ----------
 class ISICTable:
     """Load metadata, materialize filepaths, split and balance to 1:1."""
     def __init__(self, root: str, csv_name: str = CSV_NAME, image_dir: str = IMG_DIR):
@@ -128,7 +128,7 @@ class ISICTable:
         return out.reset_index(drop=True)
     
 
-# Image dataset utils
+# ---------- Image dataset ----------
 class ISICImageDataset(Dataset):
     """Return (image, label, index) for classifier or embedding extraction."""
     def __init__(self, df: pd.DataFrame, transform=None):
@@ -147,7 +147,7 @@ class ISICImageDataset(Dataset):
         return img, label, i
 
 
-# Triplet dataset utils
+# ---------- Triplet dataset ----------
 class ISICTripletDataset(Dataset):
     """Return (anchor, positive, negative, anchor_label) for triplet loss."""
     def __init__(self, df: pd.DataFrame, transform=None, seed: int = SEED):
@@ -179,7 +179,7 @@ class ISICTripletDataset(Dataset):
         return anc, pos, neg, y
     
 
-# Transform utils
+# ---------- Transforms ----------
 def build_transforms(image_size: int = 256):
     train_tfm = T.Compose([
         T.RandomHorizontalFlip(p=0.5),
@@ -195,7 +195,7 @@ def build_transforms(image_size: int = 256):
     return train_tfm, eval_tfm
 
 
-
+# ---------- Loaders ----------
 def get_loaders(
     dataroot: str = DATAPATH,
     balance_each_split: bool = True,
@@ -207,7 +207,8 @@ def get_loaders(
     """
     Returns:
         dict with keys:
-          'triplet_train', 'classif_train', 'classif_val', 'classif_test'
+          'triplet_train', 'triplet_val',
+          'classif_train', 'classif_val', 'classif_test'
         Each value is a DataLoader.
     """
     table = ISICTable(dataroot, CSV_NAME, IMG_DIR)
@@ -223,11 +224,17 @@ def get_loaders(
 
     tfm_train, tfm_eval = build_transforms(image_size=256)
 
-    # Triplet training uses only the (balanced) training split
+    # Triplet loaders (train + val)
     ds_triplet = ISICTripletDataset(tr_df, transform=tfm_train, seed=SEED)
     dl_triplet = DataLoader(
         ds_triplet, batch_size=batch_triplet, shuffle=True,
         num_workers=num_workers, pin_memory=True, drop_last=True
+    )
+
+    ds_triplet_val = ISICTripletDataset(va_df, transform=tfm_eval, seed=SEED)
+    dl_triplet_val = DataLoader(
+        ds_triplet_val, batch_size=batch_triplet, shuffle=False,
+        num_workers=num_workers, pin_memory=True, drop_last=False
     )
 
     # Classifier loaders (feature extractor -> classifier)
@@ -250,7 +257,8 @@ def get_loaders(
 
     return {
         "triplet_train": dl_triplet,
+        "triplet_val":   dl_triplet_val,   # add validation loader
         "classif_train": dl_tr_cls,
-        "classif_val": dl_va_cls,
-        "classif_test": dl_te_cls,
+        "classif_val":   dl_va_cls,
+        "classif_test":  dl_te_cls,
     }
