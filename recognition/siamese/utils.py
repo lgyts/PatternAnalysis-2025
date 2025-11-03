@@ -1,16 +1,13 @@
-# utils.py — plotting & small io helpers
 import os
-import numpy as np
+import torch
 import matplotlib.pyplot as plt
-import torchvision
+import numpy as np
 
-#  I/O 
-def ensure_dir(path: str):
-    os.makedirs(path, exist_ok=True)
+def ensure_dir(path):
+    if path and not os.path.exists(path):
+        os.makedirs(path, exist_ok=True)
 
-#  Plots 
 def plot_lines(xs, ys_list, labels, title, xlabel, ylabel, save_path):
-    """Generic multi-line plot (e.g., train vs val loss)."""
     plt.figure()
     for ys, lb in zip(ys_list, labels):
         plt.plot(xs, ys, label=lb)
@@ -44,25 +41,32 @@ def plot_confusion_matrix(cm, classes, save_path):
     plt.close()
 
 def save_sample_input(dataloader, save_dir, filename="input_sample.png"):
-    """
-    Save one example input image.
-    Used for README or visualization.
-    """
-    os.makedirs(save_dir, exist_ok=True)
+    import torchvision
+    ensure_dir(save_dir)
     sample_img, sample_label, _ = next(iter(dataloader))
-    img = sample_img[0]  
-
-    # [-1,1] -> [0,1]
+    img = sample_img[0]
     inv_norm = torchvision.transforms.Normalize(
         mean=[-m/s for m, s in zip([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])],
         std=[1/s for s in [0.5, 0.5, 0.5]]
     )
     img_show = inv_norm(img).permute(1, 2, 0).clamp(0, 1)
-
     plt.imshow(img_show)
     plt.title(f"Sample Input (Label: {sample_label[0].item()})")
     plt.axis("off")
-    save_path = os.path.join(save_dir, filename)
-    plt.savefig(save_path, bbox_inches="tight")
+    path = os.path.join(save_dir, filename)
+    plt.savefig(path, bbox_inches="tight", dpi=200)
     plt.close()
-    print(f"[INFO] Saved sample input image → {save_path}")
+
+@torch.no_grad()
+def extract_features(encoder, loader, device):
+    encoder.eval()
+    xs, ys = [], []
+    total = len(loader)
+    for i, (xb, yb, _) in enumerate(loader):
+        feats = encoder(xb.to(device)).cpu()
+        xs.append(feats); ys.append(yb)
+        if (i + 1) % 10 == 0 or (i + 1) == total:
+            pct = 100.0 * (i + 1) / total
+            print(f"\r[Extract] {pct:5.1f}% complete", end="")
+    print()
+    return torch.cat(xs), torch.cat(ys)

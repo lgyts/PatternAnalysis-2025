@@ -6,9 +6,8 @@ from modules import SiameseEncoder, BinaryClassifier
 import os
 import torch
 import torch.nn as nn
-from sklearn.metrics import confusion_matrix
 
-from utils import ensure_dir, plot_lines, plot_confusion_matrix, save_sample_input
+from utils import ensure_dir, plot_lines, save_sample_input, extract_features
 
 
 #  Siamese training (Triplet loss) 
@@ -34,7 +33,7 @@ def train_siamese(encoder, train_loader, val_loader, device):
             train_sum += loss.item()
         avg_tr = train_sum / max(1, len(train_loader))
 
-        # validation 
+        # validation
         encoder.eval()
         val_sum = 0.0
         with torch.no_grad():
@@ -51,7 +50,7 @@ def train_siamese(encoder, train_loader, val_loader, device):
         print(f"[Siamese] Epoch {epoch+1}/{EPOCHS_SIAMESE} "
               f"train_loss={avg_tr:.4f} val_loss={avg_va:.4f}")
 
-        #  Early Stopping
+        #  Early Stopping 
         if avg_va < best_val - 0.001:  # min_delta=0.001
             best_val = avg_va
             waited = 0
@@ -61,27 +60,9 @@ def train_siamese(encoder, train_loader, val_loader, device):
                 print(f"[Siamese] Early stopping at epoch {epoch+1}")
                 break
 
-    # save final model
     torch.save(encoder.state_dict(), os.path.join(MODELPATH, "siamese.pth"))
     print("[INFO] Saved final Siamese encoder (stopped model).")
     return tr_hist, va_hist
-
-
-
-#  feature extraction 
-@torch.no_grad()
-def extract_features(encoder, loader, device):
-    encoder.eval()
-    xs, ys = [], []
-    total = len(loader)
-    for i, (xb, yb, _) in enumerate(loader):
-        feats = encoder(xb.to(device)).cpu()
-        xs.append(feats); ys.append(yb)
-        if (i + 1) % 10 == 0 or (i + 1) == total:
-            pct = 100.0 * (i + 1) / total
-            print(f"\r[Extract] {pct:5.1f}% complete", end="")
-    print()
-    return torch.cat(xs), torch.cat(ys)
 
 
 #  classifier training on embeddings 
@@ -96,10 +77,10 @@ def train_classifier(clf, train_data, val_data, device):
     tr_hist, va_hist, va_acc_hist = [], [], []
 
     best_val = float('inf')
-    patience, waited = 5, 0
+    patience, waited = 5, 0  # early stop after 5 epochs without improvement
 
     for epoch in range(EPOCHS_CLS):
-        # train 
+        #  train 
         clf.train()
         idx = torch.randperm(len(Xtr))
         Xb, yb = Xtr[idx].to(device), ytr[idx].to(device)
@@ -108,7 +89,7 @@ def train_classifier(clf, train_data, val_data, device):
         opt.zero_grad(); loss.backward(); opt.step()
         train_loss = loss.item()
 
-        # validation 
+        # validation
         clf.eval()
         with torch.no_grad():
             v_logits = clf(Xva.to(device))
@@ -123,7 +104,7 @@ def train_classifier(clf, train_data, val_data, device):
         print(f"[CLS] Epoch {epoch+1}/{EPOCHS_CLS} "
               f"train_loss={train_loss:.4f} val_loss={val_loss:.4f} val_acc={val_acc*100:.2f}%")
 
-        if val_loss < best_val - 0.001:
+        if val_loss < best_val - 0.001:  # min_delta=0.001
             best_val = val_loss
             waited = 0
         else:
@@ -132,11 +113,9 @@ def train_classifier(clf, train_data, val_data, device):
                 print(f"[CLS] Early stopping at epoch {epoch+1}")
                 break
 
-    # save final model
     torch.save(clf.state_dict(), os.path.join(MODELPATH, "classifier.pth"))
     print("[INFO] Saved final classifier (stopped model).")
     return tr_hist, va_hist, va_acc_hist
-
 
 
 def main():
@@ -152,44 +131,29 @@ def main():
     ensure_dir(MODELPATH)
     ensure_dir(IMAGEPATH)
 
-    # Train Siamese encoder
     encoder = SiameseEncoder(out_dim=512).to(device)
     siam_tr_hist, siam_va_hist = train_siamese(encoder, tri_train, tri_val, device)
-    torch.save(encoder.state_dict(), os.path.join(MODELPATH, "siamese.pth"))
-    print("[INFO] Saved Siamese encoder to ./models/siamese.pth")
-
-    # plot siamese loss
     xs = list(range(1, len(siam_tr_hist) + 1))
     plot_lines(xs, [siam_tr_hist, siam_va_hist], ["Training", "Validation"],
                title="Loss of the Siamese Network",
                xlabel="Epochs", ylabel="Triplet Loss",
                save_path=os.path.join(IMAGEPATH, "siamese_loss.png"))
 
-    # Extract embeddings for classifier
     print("[INFO] Extracting embeddings...")
     encoder.eval()
     Xtr, ytr = extract_features(encoder, cls_tr, device)
     Xva, yva = extract_features(encoder, cls_va, device)
 
-    # Train classifier
     clf = BinaryClassifier(in_dim=512).to(device)
     cls_tr_hist, cls_va_hist, _ = train_classifier(clf, (Xtr, ytr), (Xva, yva), device)
-    torch.save(clf.state_dict(), os.path.join(MODELPATH, "classifier.pth"))
-    print("[INFO] Saved classifier to ./models/classifier.pth")
-
-    # plot classifier loss
     xs = list(range(1, len(cls_tr_hist) + 1))
     plot_lines(xs, [cls_tr_hist, cls_va_hist], ["Training", "Validation"],
                title="Loss of the Binary Classifier",
                xlabel="Epochs", ylabel="CrossEntropy Loss",
                save_path=os.path.join(IMAGEPATH, "classifier_loss.png"))
 
-    # Save one input sample for README
     save_sample_input(loaders["classif_train"], IMAGEPATH)
-    print("[INFO] Saved input_sample.png")
-
     print(f"[INFO] Training finished. All results saved to {IMAGEPATH}")
-
 
 
 if __name__ == "__main__":
