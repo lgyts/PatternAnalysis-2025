@@ -1,4 +1,5 @@
 # Siamese Network for ISIC 2020 Skin Lesion Classification
+**Author:** s4778251
 
 <p align="center">
   <img src="./images/Siamese Network.webp" width="400">
@@ -35,6 +36,7 @@ The implementation follows a modular design, with configuration centralized in `
 
 ## Project Structure
 
+```
 siamese/
 ├── dataset.py          # Data loading and preprocessing pipeline
 ├── modules.py          # Model definitions (SiameseEncoder, BinaryClassifier)
@@ -50,10 +52,10 @@ siamese/
     ├── classifier_loss.png
     ├── confusion_matrix.png
     └── input_sample.png
-└── dataset/
+└── dataset/            # Dataset
     ├── train-image/
     ├── train-metadata.csv 
-
+```
 
 
 ## File Explanations
@@ -67,13 +69,28 @@ siamese/
 
 
 
+## Dependencies
+```
+Tested on Google Colab (CUDA 12.6).
+
+| Package        | Version        |
+|----------------|----------------|
+| torch          | 2.8.0+cu126    |
+| torchvision    | 0.23.0+cu126   |
+| numpy          | 2.0.2          |
+| pandas         | 2.2.2          |
+| matplotlib     | 3.10.0         |
+| scikit-learn   | 1.6.1          |
+```
+
+
 ## Data Preprocessing
 
 - Input: **256×256 RGB** dermoscopic images (`train-image/`)  
 - Metadata: `train-metadata.csv` (containing `isic_id`, `patient_id`, `target`)  
 - Split: **70% train / 10% validation / 20% test**, grouped by patient ID to prevent data leakage.  
 - Normalization: `mean = [0.5, 0.5, 0.5]`, `std = [0.5, 0.5, 0.5]`.  
-- Augmentation: random rotations (±15°), color jitter, horizontal/vertical flips (p=0.5).  
+- Augmentation: random rotations, color jitter, horizontal/vertical flips.  
 
 All preprocessing configurations and split ratios are defined in `params.py` for reproducibility.
 
@@ -81,7 +98,7 @@ All preprocessing configurations and split ratios are defined in `params.py` for
 
 ## Training and Testing
 
-All experiments were conducted in **Google Colab**.  
+All experiments were conducted in **Google Colab A100**.  
 Before running, ensure that the working directory is correctly set to the project folder.
 
 
@@ -143,3 +160,96 @@ This sample dermoscopic image was randomly **rotated** and **color-adjusted** as
 Such transformations increase dataset diversity and improve model robustness to variations in image orientation and illumination.
 
 
+
+## Training & Evaluation Logs
+
+Below are condensed console outputs from **train.py** and **predict.py**.  
+They demonstrate proper training convergence, early stopping, and final evaluation results.
+
+### Training Log (`train.py`)
+The Siamese encoder stops early due to validation loss plateauing,  
+while the classifier converges smoothly to around **82% validation accuracy**.
+
+```
+Device: cuda
+[INFO] Loaded 33126 samples from train-metadata.csv
+[Siamese] Epoch 1/100 train_loss=0.9653 val_loss=0.8922
+[Siamese] Epoch 2/100 train_loss=0.8287 val_loss=0.6524
+[Siamese] Epoch 3/100 train_loss=0.6778 val_loss=0.6933
+[Siamese] Epoch 4/100 train_loss=0.5562 val_loss=0.6903
+.
+.
+.
+[Siamese] Early stopping at epoch 14
+[INFO] Saved final Siamese encoder (stopped model).
+[INFO] Extracting embeddings...
+[Extract] 100.0% complete
+[CLS] Epoch 1/80 train_loss=0.6952 val_loss=0.6876 val_acc=50.00%
+[CLS] Epoch 5/80 train_loss=0.6495 val_loss=0.6600 val_acc=50.00%
+[CLS] Epoch 10/80 train_loss=0.5977 val_loss=0.6255 val_acc=81.63%
+[CLS] Epoch 20/80 train_loss=0.4247 val_loss=0.5239 val_acc=81.63%
+[CLS] Epoch 28/80 train_loss=0.2580 val_loss=0.4580 val_acc=82.65%
+[CLS] Epoch 33/80 train_loss=0.1685 val_loss=0.4575 val_acc=82.65%
+[CLS] Early stopping at epoch 35
+[INFO] Saved final classifier (stopped model).
+[INFO] Training finished. All results saved to ./images
+```
+
+
+### Evaluation Log (`predict.py`)
+After loading trained models, the classifier achieved 81% test accuracy with balanced precision and recall.
+
+```
+/content/siamese
+Device: cuda
+[INFO] Loaded 33126 samples from train-metadata.csv
+[INFO] Extracting test features...
+[Extract] 100.0% complete
+[TEST] Accuracy: 80.51%
+[TEST] Confusion Matrix:
+ [[113  23]
+ [ 30 106]]
+
+[TEST] Classification Report:
+               precision    recall  f1-score   support
+   benign(0)       0.80      0.82      0.81       136
+malignant(1)       0.81      0.79      0.80       136
+    accuracy                           0.81       272
+   macro avg       0.81      0.81      0.81       272
+weighted avg       0.81      0.81      0.81       272
+
+[INFO] Saved confusion_matrix.png to: ./images
+```
+
+
+
+## Results Summary
+
+The Siamese encoder converged quickly with early stopping after 14 epochs, showing effective embedding learning.  
+The binary classifier achieved stable convergence with around **82% validation accuracy** and **81% test accuracy**. 
+The model demonstrates balanced precision and recall across classes, meeting the project goal of approximately 80% overall accuracy.
+
+
+## Future Work
+
+- Improve triplet diversity using **hard negative mining** to reduce validation instability.  
+- Address dataset imbalance with **class-weighted loss** or **balanced sampling**.  
+- Visualize learned embeddings using **t-SNE** or **UMAP**.  
+- Fine-tune upper layers of **ResNet-50** for domain-specific features.  
+- Experiment with **alternative loss functions** (e.g., ArcFace, Contrastive Loss) for better embedding separation.
+
+
+## References
+
+1. **ISIC 2020 Challenge Dataset** – *SIIM-ISIC Melanoma Classification* (Kaggle):  
+   https://www.kaggle.com/datasets/nischaydnk/isic-2020-jpg-256x256-resized/data  
+
+2. **Triplet Margin Loss (PyTorch Documentation)** –  
+   https://pytorch.org/docs/stable/generated/torch.nn.TripletMarginLoss.html  
+
+3. **CrossEntropy Loss (PyTorch Documentation)** –  
+   https://pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html  
+
+4. **G. Koch, R. Zemel, R. Salakhutdinov et al.**,  
+   *Siamese Neural Networks for One-Shot Image Recognition*,  
+   in *ICML Deep Learning Workshop*, 2015.  
