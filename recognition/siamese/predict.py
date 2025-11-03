@@ -24,45 +24,46 @@ def extract_embeddings(encoder, loader, device):
 
 
 def main():
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    ensure_dir(IMAGEPATH)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print("Device:", device)
 
-    # data loaders
     loaders = get_loaders()
     cls_te  = loaders["classif_test"]
 
-    # load models
-    encoder = SiameseEncoder(out_dim=1000).to(device)
-    classifier = BinaryClassifier(in_dim=1000).to(device)
+    # Load models
+    encoder = SiameseEncoder(out_dim=512).to(device)
+    clf = BinaryClassifier(in_dim=512).to(device)
 
     encoder.load_state_dict(torch.load(os.path.join(MODELPATH, "siamese.pth"), map_location=device))
-    classifier.load_state_dict(torch.load(os.path.join(MODELPATH, "classifier.pth"), map_location=device))
+    clf.load_state_dict(torch.load(os.path.join(MODELPATH, "classifier.pth"), map_location=device))
 
-    # embeddings of test set
-    Xte, yte = extract_embeddings(encoder, cls_te, device)
+    encoder.eval()
+    clf.eval()
 
-    # predict
-    classifier.eval()
+    print("[INFO] Extracting test features...")
+    Xte, yte = [], []
     with torch.no_grad():
-        logits = classifier(Xte.to(device))
-        prob = torch.softmax(logits, dim=1)[:, 1].cpu().numpy()
-        pred = np.argmax(logits.cpu().numpy(), axis=1)
+        for xb, yb, _ in cls_te:
+            feats = encoder(xb.to(device)).cpu()
+            Xte.append(feats); yte.append(yb)
+    Xte = torch.cat(Xte)
+    yte = torch.cat(yte)
 
-    acc = accuracy_score(yte.numpy(), pred)
-    cm = confusion_matrix(yte.numpy(), pred)
+    with torch.no_grad():
+        preds = clf(Xte.to(device)).argmax(1).cpu()
+
+    acc = (preds == yte).float().mean().item()
+    cm = confusion_matrix(yte.numpy(), preds.numpy())
     print(f"[TEST] Accuracy: {acc*100:.2f}%")
     print("[TEST] Confusion Matrix:\n", cm)
     print("\n[TEST] Classification Report:\n",
-          classification_report(yte.numpy(), pred, target_names=['benign(0)','malignant(1)']))
+          classification_report(yte.numpy(), preds.numpy(),
+                                target_names=["benign(0)", "malignant(1)"]))
 
-    # Plot confusion matrix
     plot_confusion_matrix(cm, classes=["Benign", "Malignant"],
                           save_path=os.path.join(IMAGEPATH, "confusion_matrix.png"))
-    print("[INFO] Saved confusion_matrix.png to:", IMAGEPATH)
+    print(f"[INFO] Saved confusion_matrix.png to: {IMAGEPATH}")
 
-
-if __name__ == "__main__":
-    main()
 
 if __name__ == "__main__":
     main()
