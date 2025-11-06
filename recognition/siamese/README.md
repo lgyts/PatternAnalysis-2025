@@ -107,8 +107,10 @@ Before running, ensure that the working directory is correctly set to the projec
 
 
 ### Train Both Networks
+```
 %cd /content/siamese
 !python train.py
+```
 
 #### This command will:
 - Train the Siamese encoder using **Triplet Margin Loss**  
@@ -118,8 +120,10 @@ Before running, ensure that the working directory is correctly set to the projec
 
 
 ### Evaluate on Test Set
+```
 %cd /content/siamese
 !python predict.py
+```
 
 #### This command loads the trained models and:
 - Evaluates performance on the test dataset
